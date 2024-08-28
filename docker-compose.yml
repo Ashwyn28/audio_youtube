@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  fastapi:
+    build: .
+    volumes:
+      - .:/app  # Map the current directory to /app in the container
+    ports:
+      - "8000:80"
+    environment:
+      - ENVIRONMENT=development
