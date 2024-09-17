@@ -5,9 +5,9 @@ import os
 
 class YoutubeAPI:
     BASE_URL = "https://www.googleapis.com/youtube/v3/search"
-    API_KEY = os.environ.get('API_KEY')
-    
+
     def __init__(self):
+        self.API_KEY = os.getenv('API_KEY')    
         self.params = {
             "key": self.API_KEY
         }
