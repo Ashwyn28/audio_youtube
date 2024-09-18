@@ -8,9 +8,7 @@ WORKDIR /app
 COPY . /app
 
 # Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir fastapi uvicorn requests pytest httpx pytest-asyncio python-dotenv
-
-
+RUN pip install --no-cache-dir fastapi uvicorn requests pytest httpx pytest-asyncio python-dotenv slowapi
 # Make port 80 available to the world outside this container
 EXPOSE 80
 

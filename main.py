@@ -1,12 +1,24 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from services import YoutubeAPI
 from utils import parse_query_response, parse_channels_response
 from dotenv import load_dotenv
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
 app = FastAPI()
+# Initialize the Limiter
+limiter = Limiter(key_func=get_remote_address)
+
+# Attach the limiter to the app
+app.state.limiter = limiter
+
+# Add exception handler for rate limit exceeded
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 api = YoutubeAPI()
 
 origins = [
@@ -41,6 +53,22 @@ async def channel_latest(channel_id):
 
 
 @app.post("/channels/latest")
-async def channels_latest(query: list[str]):
+@limiter.limit("4 per 15 minutes")
+async def channels_latest(request: Request, query: list[str]):
     res = await api.search_channels_latest(query)
     return parse_channels_response(res)
+    # return [
+    #     {
+    #         'id': "8Ip8VOuI5Ho",
+    #         'title': "test 1",
+    #     },
+    #     {
+    #         'id': "8IaBF-5T-6U",
+    #         'title': "test 2",
+    #     },
+    #     {
+    #         'id': "WKhZQwWz6wU",
+    #         'title': "test 3",
+    #     },
+    # ]
+
