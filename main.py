@@ -53,7 +53,7 @@ async def channel_latest(channel_id):
 
 
 @app.post("/channels/latest")
-@limiter.limit("4 per 15 minutes")
+@limiter.limit("4 per 5 minutes")
 async def channels_latest(request: Request, query: list[str]):
     res = await api.search_channels_latest(query)
     return parse_channels_response(res)
