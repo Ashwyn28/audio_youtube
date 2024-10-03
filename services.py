@@ -2,6 +2,10 @@ from fastapi import HTTPException
 from utils import parse_query_response
 import requests
 import os
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class YoutubeAPI:
     BASE_URL = "https://www.googleapis.com/youtube/v3/search"
@@ -44,6 +48,7 @@ class YoutubeAPI:
         if response.status_code == 200:
             return response.json()
         else:
+            logger.error(response.text)
             raise HTTPException(
                 status_code=response.status_code,
                 detail="Failed to fetch data from YouTube API",
