@@ -1,7 +1,6 @@
 from fastapi import HTTPException
 from utils import parse_query_response
 import requests
-import os
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -10,8 +9,9 @@ logger = logging.getLogger(__name__)
 class YoutubeAPI:
     BASE_URL = "https://www.googleapis.com/youtube/v3/search"
 
-    def __init__(self):
-        self.API_KEY = os.getenv('API_KEY')    
+    def __init__(self, app):
+        self.app = app
+        self.API_KEY = app.state.ssm_params['youtube_api_key']   
         self.params = {
             "key": self.API_KEY
         }

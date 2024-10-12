@@ -1,11 +1,15 @@
 version: '3.8'
 
 services:
-  fastapi:
-    build: .
-    volumes:
-      - .:/app  # Map the current directory to /app in the container
+  app:
+    build:
+      context: . 
+      dockerfile: Dockerfile
+      target: dev
     ports:
       - "8000:80"
+    volumes:
+      - .:/app  # Map the current directory to /app in the container
     environment:
+      - PYTHONUNBUFFERED=1
       - ENVIRONMENT=development
