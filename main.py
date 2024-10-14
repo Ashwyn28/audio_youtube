@@ -17,10 +17,8 @@ app = FastAPI()
 
 @app.on_event("startup")
 async def load_config():
-    print("getting ssm paramers")
     app.state.ssm_params = get_ssm_parameters(["youtube_api_key"])
     app.state.api = YoutubeAPI(app)
-    print(f"ssm parameters {app.state.ssm_params}")
 
 
 def get_ssm_parameters(names):
@@ -77,9 +75,8 @@ async def channel_latest(channel_id):
 
 
 @app.post("/channels/latest")
-@limiter.limit("4 per 5 minutes")
 async def channels_latest(request: Request, query: list[str]):
-    res = await app.staet.api.search_channels_latest(query)
+    res = await app.state.api.search_channels_latest(query)
     return parse_channels_response(res)
     # return [
     #     {
