@@ -46,6 +46,8 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 origins = [
     "http://localhost",
     "http://localhost:3000",
+    "https://orbbits.io",
+    "https://audio-youtube.orbbits.io",
 ]
 
 app.add_middleware(

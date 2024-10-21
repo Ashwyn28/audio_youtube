@@ -10,7 +10,6 @@ async def test_channels_latest():
         'UCBJycsmduvYEL83R_U4JriQ',
         'UCEcrRXW3oEYfUctetZTAWLw'
     ]
-
     response = client.post("/channels/latest", json=query_data)
 
     assert response.status_code == 200
@@ -18,7 +17,6 @@ async def test_channels_latest():
 @pytest.mark.asyncio
 async def test_search():
     query = "test query"
-
     response = client.get(f"/search?query={query}")
 
     assert response.status_code == 200
