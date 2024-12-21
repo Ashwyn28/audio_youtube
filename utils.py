@@ -9,5 +9,10 @@ def parse_query_response(data):
     ]
 
 
+def parse_channel_response(data):
+    item = data["items"][0]
+    return {"id": item["id"]["channelId"], "name": item["snippet"]["title"]}
+
+
 def parse_channels_response(channels_data):
     return sorted(channels_data, key=lambda x: x["timestamp"], reverse=True)
