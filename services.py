@@ -65,4 +65,22 @@ class YoutubeAPI:
 
         return data
 
+    async def search_channel_id(self, q):
+        params = {
+            "part": "snippet",
+            "q": q,
+            "type": "channel",
+            "maxResults": 1,
+            **self.params
+        }
+        response = requests.get(self.BASE_URL, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            error_detail = response.text 
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Failed to fetch data from YouTube API {error_detail}",
+            )
+
         

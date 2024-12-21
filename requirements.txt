@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+requests
+pytest
+httpx
+pytest-asyncio
+python-dotenv
+slowapi
+mangum
+boto3

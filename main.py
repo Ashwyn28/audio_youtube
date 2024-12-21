@@ -1,24 +1,30 @@
 from fastapi import FastAPI, Query, Request
+import os
 import boto3
 from fastapi.middleware.cors import CORSMiddleware
 from services import YoutubeAPI
 from utils import parse_query_response, parse_channels_response
 
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from mangum import Mangum
 
-# load_dotenv()
-
+load_dotenv()
 app = FastAPI()
 
 
 @app.on_event("startup")
 async def load_config():
-    app.state.ssm_params = get_ssm_parameters(["youtube_api_key"])
-    app.state.api = YoutubeAPI(app)
+    if os.getenv('ENVIRONMENT') == "development":
+        ssm_params = {}
+        ssm_params['youtube_api_key'] = os.getenv('API_KEY')
+        app.state.ssm_params = ssm_params
+        app.state.api = YoutubeAPI(app)
+    else: 
+        app.state.ssm_params = get_ssm_parameters(["youtube_api_key"])
+        app.state.api = YoutubeAPI(app)
 
 
 def get_ssm_parameters(names):
@@ -80,20 +86,11 @@ async def channel_latest(channel_id):
 async def channels_latest(request: Request, query: list[str]):
     res = await app.state.api.search_channels_latest(query)
     return parse_channels_response(res)
-    # return [
-    #     {
-    #         'id': "8Ip8VOuI5Ho",
-    #         'title': "test 1",
-    #     },
-    #     {
-    #         'id': "8IaBF-5T-6U",
-    #         'title': "test 2",
-    #     },
-    #     {
-    #         'id': "WKhZQwWz6wU",
-    #         'title': "test 3",
-    #     },
-    # ]
 
+
+@app.get("/search/channel")
+async def search_channel(query: str = Query(..., description="Search channel")):
+    res = await app.state.api.search_channel_id(query)
+    return res
 
 handler = Mangum(app, lifespan="on")
