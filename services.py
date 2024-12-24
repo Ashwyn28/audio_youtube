@@ -36,12 +36,12 @@ class YoutubeAPI:
             )
 
     
-    async def search_channel_latest(self, channel_id):
+    async def search_channel_latest(self, channel_id, max_results=3):
         params = {
             "part": "snippet",
             "channelId": channel_id,
             "order": "date",
-            "maxResults": 3,
+            "maxResults": max_results,
             **self.params
         }
         response = requests.get(self.BASE_URL, params=params)
@@ -57,8 +57,9 @@ class YoutubeAPI:
 
     async def search_channels_latest(self, channel_ids):
         data = []
+        max_results = 1
         for channel_id in channel_ids:
-            res = await self.search_channel_latest(channel_id)
+            res = await self.search_channel_latest(channel_id, max_results)
             channel_data = parse_query_response(res)
             for video in channel_data:
                 data.append(video)
