@@ -1,3 +1,12 @@
 .env
-/__pycache__/*
+.env.*
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.coverage
+htmlcov
+.DS_Store
 todo.md

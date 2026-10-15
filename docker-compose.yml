@@ -1,15 +1,13 @@
-version: '3.8'
-
 services:
   app:
     build:
-      context: . 
+      context: .
       dockerfile: Dockerfile
       target: dev
     ports:
       - "8000:8000"
     volumes:
-      - .:/app  # Map the current directory to /app in the container
+      - .:/var/task
     environment:
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=development
