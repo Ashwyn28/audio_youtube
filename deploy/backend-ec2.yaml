@@ -1,0 +1,312 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AudioTube single-host ARM64 HTTP backend with HTTPS, EIP and SSM access.
+
+Parameters:
+  ResourcePrefix:
+    Type: String
+    Default: audiotube
+    AllowedPattern: '^[a-z][a-z0-9-]{1,30}$'
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet with an Internet Gateway route; must belong to VpcId.
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+  InstanceType:
+    Type: String
+    Default: t4g.micro
+    AllowedValues: [t4g.micro, t4g.small]
+  BackendImageUri:
+    Type: String
+    Description: New immutable ARM64 image tag/digest in the existing audio-fastapi-app ECR repository.
+    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/audio-fastapi-app(:[A-Za-z0-9_.-]+|@sha256:[a-f0-9]{64})$'
+  DomainName:
+    Type: String
+    Default: audio-api.orbbits.io
+    Description: TLS hostname. An empty value enables HTTP-only access for temporary testing.
+    AllowedPattern: '^$|^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'
+  HostedZoneId:
+    Type: String
+    Default: ''
+    Description: Optional public Route53 zone ID, without /hostedzone/. Leave empty for externally managed DNS.
+    AllowedPattern: '^$|^Z[A-Z0-9]+$'
+  CorsOrigins:
+    Type: String
+    Default: https://audio-youtube.orbbits.io,https://orbbits.io
+    Description: Comma-separated HTTPS frontend origins; include the actual production Vercel hostname if needed.
+    AllowedPattern: '^https://[A-Za-z0-9.-]+(:[0-9]+)?(,https://[A-Za-z0-9.-]+(:[0-9]+)?)*$'
+
+Conditions:
+  HasDomain:
+    Fn::Not:
+      - Fn::Equals: [{Ref: DomainName}, '']
+  CreateDns:
+    Fn::And:
+      - Condition: HasDomain
+      - Fn::Not:
+          - Fn::Equals: [{Ref: HostedZoneId}, '']
+
+Resources:
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AudioTube HTTP/HTTPS ingress only; administration uses SSM.
+      VpcId: {Ref: VpcId}
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: {Fn::Sub: '${ResourcePrefix}-backend'}
+        - Key: Project
+          Value: audiotube
+
+  BackendRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReadAudioTubeImageAndKey
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                Resource: {Fn::Sub: 'arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/audio-fastapi-app'}
+              - Effect: Allow
+                Action: ssm:GetParameters
+                Resource: {Fn::Sub: 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/youtube_api_key'}
+              # Modern AL2023 SSM Agent control/data channels, without SSH keys.
+              - Effect: Allow
+                Action:
+                  - ssm:UpdateInstanceInformation
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: '*'
+              - Effect: Allow
+                Action: cloudformation:SignalResource
+                Resource: {Ref: 'AWS::StackId'}
+      Tags:
+        - Key: Project
+          Value: audiotube
+
+  BackendInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [{Ref: BackendRole}]
+
+  BackendInstance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT15M
+    Properties:
+      ImageId: {Ref: AmiId}
+      InstanceType: {Ref: InstanceType}
+      IamInstanceProfile: {Ref: BackendInstanceProfile}
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          SubnetId: {Ref: SubnetId}
+          AssociatePublicIpAddress: true
+          GroupSet: [{Ref: BackendSecurityGroup}]
+      CreditSpecification:
+        CpuCredits: standard
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        # Docker's bridge adds a network hop; boto3 still requires IMDSv2 tokens.
+        HttpPutResponseHopLimit: 2
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 10
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: {Fn::Sub: '${ResourcePrefix}-backend'}
+        - Key: Project
+          Value: audiotube
+        - Key: ManagedBy
+          Value: CloudFormation
+      UserData:
+        Fn::Base64:
+          Fn::Sub: |
+            #!/bin/bash
+            set -euo pipefail
+            # Never enable shell tracing: ECR login credentials flow over stdin.
+            export AWS_DEFAULT_REGION='${AWS::Region}'
+            TOKEN=$(curl -fsS --retry 5 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' http://169.254.169.254/latest/api/token)
+            INSTANCE_ID=$(curl -fsS --retry 5 -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+            unset TOKEN
+            signal_completion() {
+              code=$?
+              trap - EXIT
+              status=FAILURE
+              if [ "$code" -eq 0 ]; then status=SUCCESS; fi
+              aws cloudformation signal-resource --stack-name '${AWS::StackName}' --logical-resource-id BackendInstance --unique-id "$INSTANCE_ID" --status "$status" --region '${AWS::Region}' || true
+              exit "$code"
+            }
+            trap signal_completion EXIT
+            dnf install -y docker awscli-2
+            systemctl enable --now docker amazon-ssm-agent
+            if [ ! -f /swapfile ]; then
+              fallocate -l 1G /swapfile
+              chmod 600 /swapfile
+              mkswap /swapfile
+              swapon /swapfile
+              echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
+            fi
+            install -d -m 700 /etc/audiotube /var/lib/audiotube/caddy-data /var/lib/audiotube/caddy-config
+            cat > /etc/audiotube/app.env <<'ENV'
+            ENVIRONMENT=production
+            AUDIO_ENABLED=true
+            PYTHONUNBUFFERED=1
+            PYTHONDONTWRITEBYTECODE=1
+            AWS_DEFAULT_REGION=${AWS::Region}
+            AWS_REGION=${AWS::Region}
+            CORS_ORIGINS=${CorsOrigins}
+            ENV
+            cat > /etc/audiotube/deployment.env <<'ENV'
+            BACKEND_IMAGE_URI=${BackendImageUri}
+            AWS_DEFAULT_REGION=${AWS::Region}
+            ECR_REGISTRY=${AWS::AccountId}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}
+            ENV
+            chmod 600 /etc/audiotube/*.env
+            cat > /usr/local/bin/audiotube-pull <<'SCRIPT'
+            #!/bin/bash
+            set -euo pipefail
+            source /etc/audiotube/deployment.env
+            if docker image inspect "$BACKEND_IMAGE_URI" >/dev/null 2>&1; then exit 0; fi
+            docker_config_dir=$(mktemp -d /run/audiotube-docker.XXXXXX)
+            export DOCKER_CONFIG="$docker_config_dir"
+            trap 'rm -rf "$docker_config_dir"' EXIT
+            aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+            docker pull "$BACKEND_IMAGE_URI"
+            SCRIPT
+            chmod 700 /usr/local/bin/audiotube-pull
+            cat > /etc/systemd/system/audiotube-api.service <<'UNIT'
+            [Unit]
+            Description=AudioTube HTTP backend
+            Requires=docker.service
+            After=network-online.target docker.service
+            Wants=network-online.target
+            StartLimitIntervalSec=0
+            [Service]
+            EnvironmentFile=/etc/audiotube/deployment.env
+            ExecStartPre=/usr/local/bin/audiotube-pull
+            ExecStartPre=-/usr/bin/docker rm -f audiotube-api
+            ExecStart=/usr/bin/docker run --name audiotube-api --init --read-only --tmpfs /tmp:rw,nosuid,noexec,size=128m --cap-drop ALL --security-opt no-new-privileges --memory=640m --memory-swap=1280m --cpus=1.5 --log-opt max-size=10m --log-opt max-file=3 --env-file /etc/audiotube/app.env --publish 127.0.0.1:8000:8000 $BACKEND_IMAGE_URI
+            ExecStop=/usr/bin/docker stop -t 30 audiotube-api
+            Restart=always
+            RestartSec=5
+            TimeoutStartSec=240
+            TimeoutStopSec=45
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+            site='${DomainName}'
+            if [ -z "$site" ]; then site=':80'; fi
+            cat > /etc/audiotube/Caddyfile <<CADDY
+            $site {
+              reverse_proxy 127.0.0.1:8000 {
+                flush_interval -1
+                transport http {
+                  dial_timeout 5s
+                  response_header_timeout 100s
+                }
+              }
+              header -Server
+            }
+            CADDY
+            cat > /etc/systemd/system/audiotube-proxy.service <<'UNIT'
+            [Unit]
+            Description=AudioTube HTTPS reverse proxy
+            Requires=docker.service
+            After=network-online.target docker.service audiotube-api.service
+            Wants=network-online.target audiotube-api.service
+            StartLimitIntervalSec=0
+            [Service]
+            ExecStartPre=-/usr/bin/docker rm -f audiotube-proxy
+            ExecStart=/usr/bin/docker run --name audiotube-proxy --network host --read-only --tmpfs /tmp:rw,nosuid,noexec,size=16m --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges --memory=128m --memory-swap=256m --log-opt max-size=10m --log-opt max-file=3 --volume /etc/audiotube/Caddyfile:/etc/caddy/Caddyfile:ro --volume /var/lib/audiotube/caddy-data:/data --volume /var/lib/audiotube/caddy-config:/config caddy:2
+            ExecStop=/usr/bin/docker stop -t 15 audiotube-proxy
+            Restart=always
+            RestartSec=5
+            TimeoutStopSec=30
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+            docker pull caddy:2
+            systemctl daemon-reload
+            systemctl enable --now audiotube-api
+            ready=false
+            for attempt in $(seq 1 120); do
+              if curl -fsS http://127.0.0.1:8000/health >/dev/null; then ready=true; break; fi
+              sleep 2
+            done
+            if [ "$ready" != true ]; then exit 1; fi
+            systemctl enable --now audiotube-proxy
+            systemctl is-active --quiet audiotube-proxy
+
+  BackendAddress:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: {Fn::Sub: '${ResourcePrefix}-backend'}
+        - Key: Project
+          Value: audiotube
+
+  BackendAddressAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: {Fn::GetAtt: [BackendAddress, AllocationId]}
+      InstanceId: {Ref: BackendInstance}
+
+  BackendDns:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateDns
+    Properties:
+      HostedZoneId: {Ref: HostedZoneId}
+      Name: {Ref: DomainName}
+      Type: A
+      TTL: '60'
+      ResourceRecords: [{Ref: BackendAddress}]
+
+Outputs:
+  InstanceId:
+    Value: {Ref: BackendInstance}
+  PublicIp:
+    Value: {Ref: BackendAddress}
+  BackendUrl:
+    Value:
+      Fn::If:
+        - HasDomain
+        - Fn::Sub: 'https://${DomainName}'
+        - Fn::Sub: 'http://${BackendAddress}'
+  SessionCommand:
+    Value: {Fn::Sub: 'aws ssm start-session --target ${BackendInstance} --region ${AWS::Region}'}

@@ -10,3 +10,6 @@ venv/
 htmlcov/
 .DS_Store
 todo.md
+test-results/
+/frontend/
+/AGENT_STATUS.md
