@@ -132,7 +132,7 @@ Resources:
           AssociatePublicIpAddress: true
           GroupSet: [{Ref: BackendSecurityGroup}]
       CreditSpecification:
-        CpuCredits: standard
+        CPUCredits: standard
       MetadataOptions:
         HttpEndpoint: enabled
         HttpTokens: required
