@@ -10,3 +10,6 @@ __pycache__
 htmlcov
 .DS_Store
 todo.md
+frontend
+artifacts
+AGENT_STATUS.md

@@ -11,3 +11,17 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - ENVIRONMENT=development
+      - AUDIO_ENABLED=${AUDIO_ENABLED:-true}
+    env_file:
+      - .env
+  frontend:
+    build:
+      context: ${FRONTEND_CONTEXT:-../audio_youtube_frontend/audio-youtube-frontend}
+      target: production
+    ports:
+      - "3000:3000"
+    environment:
+      - PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL:-http://localhost:8000}
+      - ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
+    depends_on:
+      - app

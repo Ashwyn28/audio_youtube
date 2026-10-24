@@ -1,10 +1,11 @@
 fastapi
 uvicorn[standard]
-requests
 pytest
 httpx
+anyio
 pytest-asyncio
 python-dotenv
 slowapi
 mangum
 boto3
+yt-dlp[default]
